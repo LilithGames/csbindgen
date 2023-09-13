@@ -1,4 +1,5 @@
 use crate::{alias_map::AliasMap, builder::BindgenOptions};
+use itertools::Itertools;
 
 pub fn escape_name(str: &str) -> String {
     match str {
@@ -73,7 +74,7 @@ pub enum TypeKind {
     Pointer(PointerType, Box<RustType>),
     FixedArray(String, Option<PointerType>),         // digits
     Function(Vec<Parameter>, Option<Box<RustType>>), // parameter, return
-    Option(Box<RustType>),
+    Generic(Vec<RustType>),
 }
 
 #[derive(Clone, Debug)]
@@ -196,9 +197,10 @@ impl RustType {
                     sb.push_str(t.to_rust_string(type_path).as_str());
                 }
             }
-            Option(inner) => {
-                sb.push_str("Option<");
-                sb.push_str(inner.to_rust_string(type_path).as_str());
+            Generic(inner) => {
+                emit_type_name(&mut sb);
+                sb.push('<');
+                sb.push_str(inner.iter().map(|t|t.to_rust_string(type_path).as_str().to_owned()).join(", ").as_str());
                 sb.push('>');
             }
         };
@@ -354,10 +356,11 @@ impl RustType {
                     sb.push_str(build_method_delegate_name(method_name, parameter_name).as_str());
                 }
             }
-            TypeKind::Option(inner) => {
+            TypeKind::Generic(inner) => {
                 // function pointer can not annotate ? so emit inner only
-                sb.push_str(
-                    inner
+                if self.type_name == "Option" {
+                    sb.push_str(
+                    inner.first().unwrap()
                         .to_csharp_string(
                             options,
                             alias_map,
@@ -367,6 +370,21 @@ impl RustType {
                         )
                         .as_str(),
                 );
+                } else {
+                    sb.push_str(type_csharp_string.as_str());
+                    sb.push('<');
+                    sb.push_str(
+                        inner.iter().map(|x|
+                            x.to_csharp_string(
+                                options,
+                                alias_map,
+                                emit_from_struct,
+                                method_name,
+                                parameter_name,
+                            )).join(", ").as_str(),
+                    );
+                    sb.push('>');
+                }
             }
             _ => {
                 fn emit_pointer(
@@ -460,9 +478,7 @@ pub fn build_method_delegate_if_required(
 
     match &me.type_kind {
         TypeKind::Function(parameters, return_type) => {
-            if emit_from_struct && !options.csharp_use_function_pointer {
-                None
-            } else if options.csharp_use_function_pointer {
+            if emit_from_struct || options.csharp_use_function_pointer {
                 None
             } else {
                 let return_type_name = match return_type {
@@ -504,13 +520,24 @@ pub fn build_method_delegate_if_required(
                 Some(delegate_code)
             }
         }
-        TypeKind::Option(inner) => build_method_delegate_if_required(
-            inner,
-            options,
-            alias_map,
-            method_name,
-            parameter_name,
-        ),
+        TypeKind::Generic(inner) => {let del = inner
+            .iter()
+            .filter_map(|x| {
+                build_method_delegate_if_required(
+                    x,
+                    options,
+                    alias_map,
+                    method_name,
+                    parameter_name,
+                )
+            })
+            .join(", ");
+            if del.is_empty() {
+                None
+            } else {
+                Some(del)
+            }
+        },
         _ => None,
     }
 }

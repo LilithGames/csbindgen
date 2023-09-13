@@ -14,7 +14,7 @@ use emitter::*;
 use field_map::FieldMap;
 use parser::*;
 use std::{collections::HashSet, error::Error};
-use type_meta::{ExternMethod, RustEnum, RustStruct, RustType, RustConst};
+use type_meta::{ExternMethod, RustConst, RustEnum, RustStruct, RustType};
 
 enum GenerateKind {
     InputBindgen,
@@ -96,8 +96,10 @@ fn collect_using_types(
     aliases: &AliasMap,
     rust_type: &RustType,
 ) {
-    if let type_meta::TypeKind::Option(o) = &rust_type.type_kind {
-        collect_using_types(using_types, aliases, o);
+    if let type_meta::TypeKind::Generic(generic_args) = &rust_type.type_kind {
+        for generic in generic_args {
+            collect_using_types(using_types, aliases, generic);
+        }
     } else if let type_meta::TypeKind::Function(parameters, return_type) = &rust_type.type_kind {
         if let Some(x) = &return_type {
             collect_using_types(using_types, aliases, x);
@@ -121,8 +123,10 @@ fn collect_field_types(
     struct_type_normalized: &String,
     rust_type: &RustType,
 ) {
-    if let type_meta::TypeKind::Option(o) = &rust_type.type_kind {
-        collect_field_types(field_map, aliases, struct_type_normalized, o);
+    if let type_meta::TypeKind::Generic(generic_args) = &rust_type.type_kind {
+        for generic in generic_args {
+            collect_field_types(field_map, aliases, struct_type_normalized, generic);
+        }
     } else if let type_meta::TypeKind::Function(parameters, return_type) = &rust_type.type_kind {
         if let Some(x) = &return_type {
             collect_field_types(field_map, aliases, struct_type_normalized, x);

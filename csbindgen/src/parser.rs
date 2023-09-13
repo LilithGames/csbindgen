@@ -1,7 +1,7 @@
 use crate::{alias_map::AliasMap, builder::BindgenOptions, field_map::FieldMap, type_meta::*};
 use regex::Regex;
 use std::collections::HashSet;
-use syn::{ForeignItem, Item, Pat, ReturnType};
+use syn::{ForeignItem, GenericArgument, Item, Pat, ReturnType};
 
 enum FnItem {
     ForeignItem(syn::ForeignItemFn),
@@ -251,48 +251,51 @@ fn collect_fields_unnamed(fields: &syn::FieldsUnnamed) -> Vec<FieldMember> {
     result
 }
 
-pub fn collect_const(ast: &syn::File, result: &mut Vec<RustConst>,filter:fn(const_name: &str) -> bool) {
+pub fn collect_const(
+    ast: &syn::File,
+    result: &mut Vec<RustConst>,
+    filter: fn(const_name: &str) -> bool,
+) {
     for item in depth_first_module_walk(&ast.items) {
         if let Item::Const(ct) = item {
             // pub const Ident: ty = expr
             let const_name = ct.ident.to_string();
             if filter(const_name.as_str()) {
-                
-            let t = parse_type(&ct.ty);
+                let t = parse_type(&ct.ty);
 
-            if let syn::Expr::Lit(lit_expr) = &*ct.expr {
-                let value = match &lit_expr.lit {
-                    syn::Lit::Str(s) => {
-                        format!("\"{}\"", s.value())
-                    }
-                    syn::Lit::ByteStr(bs) => {
-                        format!("{:?}", bs.value())
-                    }
-                    syn::Lit::Byte(b) => {
-                        format!("{}", b.value())
-                    }
-                    syn::Lit::Char(c) => {
-                        format!("'{}'", c.value())
-                    }
-                    syn::Lit::Int(i) => {
-                        format!("{}", i.base10_parse::<i64>().unwrap())
-                    }
-                    syn::Lit::Float(f) => {
-                        format!("{}", f.base10_parse::<f64>().unwrap())
-                    }
-                    syn::Lit::Bool(b) => {
-                        format!("{}", b.value)
-                    }
-                    _ => format!(""),
-                };
+                if let syn::Expr::Lit(lit_expr) = &*ct.expr {
+                    let value = match &lit_expr.lit {
+                        syn::Lit::Str(s) => {
+                            format!("\"{}\"", s.value())
+                        }
+                        syn::Lit::ByteStr(bs) => {
+                            format!("{:?}", bs.value())
+                        }
+                        syn::Lit::Byte(b) => {
+                            format!("{}", b.value())
+                        }
+                        syn::Lit::Char(c) => {
+                            format!("'{}'", c.value())
+                        }
+                        syn::Lit::Int(i) => {
+                            format!("{}", i.base10_parse::<i64>().unwrap())
+                        }
+                        syn::Lit::Float(f) => {
+                            format!("{}", f.base10_parse::<f64>().unwrap())
+                        }
+                        syn::Lit::Bool(b) => {
+                            format!("{}", b.value)
+                        }
+                        _ => format!(""),
+                    };
 
-                result.push(RustConst {
-                    const_name: const_name,
-                    rust_type: t,
-                    value: value,
-                });
+                    result.push(RustConst {
+                        const_name: const_name,
+                        rust_type: t,
+                        value: value,
+                    });
+                }
             }
-        }
         }
     }
 }
@@ -585,12 +588,7 @@ fn parse_type_path(t: &syn::TypePath) -> RustType {
         // generics
         if let Some(syn::GenericArgument::Type(t)) = x.args.first() {
             let rust_type = parse_type(t);
-            if last_segment.ident == "Option" {
-                return RustType {
-                    type_name: "Option".to_string(),
-                    type_kind: TypeKind::Option(Box::new(rust_type)),
-                };
-            } else if last_segment.ident == "NonNull" {
+            if last_segment.ident == "NonNull" {
                 return RustType {
                     type_name: "NonNull".to_string(),
                     type_kind: TypeKind::Pointer(PointerType::NonNull, Box::new(rust_type)),
@@ -602,10 +600,25 @@ fn parse_type_path(t: &syn::TypePath) -> RustType {
                 };
             }
         }
-    }
 
-    return RustType {
+        return RustType {
+            type_name: last_segment.ident.to_string(),
+            type_kind: TypeKind::Generic(
+                x.args
+                    .iter()
+                    .filter_map(|t| {
+                        if let GenericArgument::Type(t) = t {
+                            Some(parse_type(t))
+                        } else {
+                            None
+                        }
+                    })
+                    .collect(),
+            ),
+        };
+    }
+    RustType {
         type_name: last_segment.ident.to_string(),
         type_kind: TypeKind::Normal,
-    };
+    }
 }
