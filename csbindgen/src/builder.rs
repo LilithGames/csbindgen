@@ -1,3 +1,4 @@
+use crate::type_meta::RustType;
 use std::path::PathBuf;
 use std::{
     error::Error,
@@ -32,6 +33,8 @@ pub struct BindgenOptions {
     pub csharp_use_nint_types: bool,
     pub csharp_imported_namespaces: Vec<String>,
     pub csharp_generate_const_filter: fn(const_name: &str) -> bool,
+    pub csharp_gen_safe_handle: Vec<String>,
+    pub csharp_type_redirect: fn(rust_type: &RustType) -> RustType,
 }
 
 impl Default for Builder {
@@ -57,6 +60,8 @@ impl Default for Builder {
                 csharp_use_nint_types: true,
                 csharp_imported_namespaces: vec![],
                 csharp_generate_const_filter: |_| false,
+                csharp_gen_safe_handle: vec![],
+                csharp_type_redirect: |x| x.clone(),
             },
         }
     }
@@ -69,7 +74,9 @@ impl Builder {
 
     /// Add an input .rs file(such as generated from bindgen) to generate binding.
     pub fn input_bindgen_file<T: AsRef<Path>>(mut self, input_bindgen_file: T) -> Builder {
-        self.options.input_bindgen_files.push(input_bindgen_file.as_ref().to_path_buf());
+        self.options
+            .input_bindgen_files
+            .push(input_bindgen_file.as_ref().to_path_buf());
         self
     }
 
@@ -86,8 +93,6 @@ impl Builder {
         self.options.method_filter = method_filter;
         self
     }
-
-
 
     /// add original extern call type prefix to rust wrapper,
     /// `return {rust_method_type_path}::foo()`
@@ -107,6 +112,20 @@ impl Builder {
     /// `mod lz4;`, `use super::lz4;`
     pub fn rust_file_header<T: Into<String>>(mut self, rust_file_header: T) -> Builder {
         self.options.rust_file_header = rust_file_header.into();
+        self
+    }
+
+    /// configure C# extra import namespace,
+    /// "using {csharp_namespace};"
+    pub fn csharp_gen_safe_handle<T: Into<String>>(mut self, class_name: T) -> Builder {
+        self.options.csharp_gen_safe_handle.push(class_name.into());
+        self
+    }
+
+    /// configure C# load dll name,
+    /// `[DllImport({csharp_dll_name})]`
+    pub fn csharp_type_redirect(mut self, func: fn(rust_type: &RustType) -> RustType) -> Builder {
+        self.options.csharp_type_redirect = func;
         self
     }
 
@@ -198,11 +217,18 @@ impl Builder {
     /// equivalent to csharp_generate_const_filter(|_| csharp_generate_const)
     #[deprecated(note = "User csharp_generate_const_filter instead")]
     pub fn csharp_generate_const(mut self, csharp_generate_const: bool) -> Builder {
-        self.csharp_generate_const_filter(if csharp_generate_const { |_| true } else { |_| false })
+        self.csharp_generate_const_filter(if csharp_generate_const {
+            |_| true
+        } else {
+            |_| false
+        })
     }
 
     /// configure C# generate const filter, default `|_| false`
-    pub fn csharp_generate_const_filter(mut self, csharp_generate_const_filter: fn(const_name: &str) -> bool) -> Builder {
+    pub fn csharp_generate_const_filter(
+        mut self,
+        csharp_generate_const_filter: fn(const_name: &str) -> bool,
+    ) -> Builder {
         self.options.csharp_generate_const_filter = csharp_generate_const_filter;
         self
     }

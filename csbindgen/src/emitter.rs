@@ -74,6 +74,183 @@ use ::std::os::raw::*;
     result
 }
 
+// convert struct* to SafeHandle
+pub fn emit_type_redirect(options: &BindgenOptions, rust_type: &RustType) -> RustType {
+    if let TypeKind::Pointer(_, inner) = &rust_type.type_kind {
+        if options
+            .csharp_gen_safe_handle
+            .iter()
+            .any(|name| name.to_string() == inner.type_name)
+        {
+            return RustType {
+                type_name: format!("{}Handle", inner.type_name),
+                type_kind: TypeKind::Normal,
+            };
+        }
+    }
+
+    (options.csharp_type_redirect)(&rust_type)
+}
+
+// convert struct* to System.IntPtr
+pub fn emit_type_to_intptr(options: &BindgenOptions, rust_type: &RustType) -> RustType {
+    if let TypeKind::Pointer(_, inner) = &rust_type.type_kind {
+        if (options
+            .csharp_gen_safe_handle
+            .iter()
+            .any(|name| name.to_string() == inner.type_name))
+        {
+            return RustType {
+                type_name: "System.IntPtr".to_string(),
+                type_kind: TypeKind::Normal,
+            };
+        }
+    }
+
+    (options.csharp_type_redirect)(&rust_type)
+}
+
+pub fn emit_csharp_safe_handle(
+    methods: &Vec<ExternMethod>,
+    aliases: &AliasMap,
+    options: &BindgenOptions,
+) -> String {
+    let mut structs_string = String::new();
+
+    let class_name = &options.csharp_class_name;
+    let method_prefix = &options.csharp_method_prefix;
+
+    for struct_name in &options.csharp_gen_safe_handle {
+        let struct_type = emit_type_redirect(
+            options,
+            &RustType {
+                type_name: struct_name.to_string(),
+                type_kind: TypeKind::Pointer(
+                    PointerType::Box,
+                    Box::new(RustType {
+                        type_name: struct_name.to_string(),
+                        type_kind: TypeKind::Normal,
+                    }),
+                ),
+            },
+        );
+
+        //TODO: remove this hack
+        if struct_type.type_name == struct_name.to_string() {
+            continue;
+        }
+
+        let convert_type = emit_type_redirect(options, &struct_type);
+
+        //let name = (options.csharp_type_rename)(escape_name(&item.struct_name));
+        let name = escape_name(&convert_type.type_name);
+
+        structs_string.push_str_ln(
+            format!(
+                "
+    public partial class {name} : SafeHandle {{
+        public {name}(System.IntPtr ptr) : base(ptr, true) {{ }}
+        public {name}() : base(IntPtr.Zero, true) {{ }}
+        public override bool IsInvalid {{ get {{ return this.handle == IntPtr.Zero; }} }}"
+            )
+            .as_str(),
+        );
+
+        // generate methods
+        for item in methods {
+            let mut method_name = &item.method_name;
+            let method_name_temp: String;
+            if method_prefix.is_empty() {
+                method_name_temp = escape_name(method_name);
+                method_name = &method_name_temp;
+            }
+
+            if item.parameters.len() < 1 {
+                continue;
+            }
+
+            let first_parameter = &item.parameters[0];
+            let first_parameter_type_name =
+                emit_type_redirect(options, &first_parameter.rust_type).type_name;
+
+            if first_parameter_type_name != name {
+                continue;
+            }
+
+            let return_type = match &item.return_type {
+                Some(x) => {
+                    let redirect_type = emit_type_redirect(options, &x);
+
+                    redirect_type.to_csharp_string(
+                        options,
+                        aliases,
+                        false,
+                        method_name,
+                        &"return".to_string(),
+                    )
+                }
+                None => "void".to_string(),
+            };
+
+            let mut parameters_str = String::new();
+            let mut call_parameters_str = String::from("this.handle");
+
+            for idx in 1..item.parameters.len() {
+                let p = &item.parameters[idx];
+                let redirect_type = emit_type_redirect(options, &p.rust_type);
+
+                let type_name =
+                    redirect_type.to_csharp_string(options, aliases, false, method_name, &p.name);
+
+                if idx != 1 {
+                    parameters_str += ", ";
+                }
+
+                // delegate function
+                if let Some(_) = build_method_delegate_if_required(
+                    &p.rust_type,
+                    options,
+                    aliases,
+                    method_name,
+                    &p.name,
+                ) {
+                    parameters_str += format!("{class_name}.").as_str();
+                }
+
+                parameters_str +=
+                    format!("{} {}", type_name, escape_name(p.name.as_str())).as_str();
+
+                call_parameters_str += ", ";
+                call_parameters_str += escape_name(p.name.as_str()).as_str();
+            }
+
+            structs_string.push_str_ln(
+                format!(
+                    "        public unsafe {return_type} {method_prefix}{method_name}({parameters_str})"
+                )
+                .as_str(),
+            );
+
+            structs_string.push_str("        {\n            ");
+            if let Some(_) = &item.return_type {
+                structs_string.push_str("return ");
+            }
+
+            structs_string.push_str_ln(
+                format!("{class_name}.{method_name}({call_parameters_str});").as_str(),
+            );
+
+            structs_string.push_str_ln("        }");
+
+            structs_string.push('\n');
+        }
+
+        structs_string.push_str_ln("    }");
+    }
+
+    structs_string
+}
+
 pub fn emit_csharp(
     methods: &Vec<ExternMethod>,
     aliases: &AliasMap,
@@ -158,21 +335,40 @@ pub fn emit_csharp(
         };
         let return_type = match &item.return_type {
             Some(x) => {
-                x.to_csharp_string(options, aliases, false, method_name, &"return".to_string())
+                let redirect_type = emit_type_redirect(options, &x);
+                redirect_type.to_csharp_string(
+                    options,
+                    aliases,
+                    false,
+                    method_name,
+                    &"return".to_string(),
+                )
             }
             None => "void".to_string(),
         };
 
+        let mut parameter_count = 0;
         let parameters = item
             .parameters
             .iter()
             .map(|p| {
+                let redirect_type = if parameter_count == 0 {
+                    emit_type_to_intptr(options, &p.rust_type)
+                } else {
+                    emit_type_redirect(options, &p.rust_type)
+                };
+
+                parameter_count += 1;
                 let mut type_name =
-                    p.rust_type
-                        .to_csharp_string(options, aliases, false, method_name, &p.name);
+                    redirect_type.to_csharp_string(options, aliases, false, method_name, &p.name);
                 if type_name == "bool" {
                     type_name = "[MarshalAs(UnmanagedType.U1)] bool".to_string();
                 }
+
+                println!(
+                    "cargo:warning=[yrm test] convert {} {} to {} {}",
+                    method_name, p.rust_type.type_name, redirect_type.type_name, type_name
+                );
 
                 format!("{} {}", type_name, escape_name(p.name.as_str()))
             })
@@ -215,7 +411,8 @@ pub fn emit_csharp(
                 structs_string.push_str_ln("        [FieldOffset(0)]");
             }
 
-            let type_name = field.rust_type.to_csharp_string(
+            let redirect_type = (options.csharp_type_redirect)(&field.rust_type);
+            let type_name = redirect_type.to_csharp_string(
                 options,
                 aliases,
                 true,
@@ -267,6 +464,8 @@ pub fn emit_csharp(
         structs_string.push_str_ln("    }");
         structs_string.push('\n');
     }
+
+    let class_helper_string = emit_csharp_safe_handle(methods, aliases, options);
 
     let mut enum_string = String::new();
     for item in enums {
@@ -321,7 +520,7 @@ pub fn emit_csharp(
         } else {
             let value = if type_name == "float" {
                 format!("{}f", item.value)
-            }else {
+            } else {
                 item.value.to_string()
             };
 
@@ -367,6 +566,7 @@ namespace {namespace}
 
 {structs_string}
 {enum_string}
+{class_helper_string}
 }}
     "
     );

@@ -200,7 +200,13 @@ impl RustType {
             Generic(inner) => {
                 emit_type_name(&mut sb);
                 sb.push('<');
-                sb.push_str(inner.iter().map(|t|t.to_rust_string(type_path).as_str().to_owned()).join(", ").as_str());
+                sb.push_str(
+                    inner
+                        .iter()
+                        .map(|t| t.to_rust_string(type_path).as_str().to_owned())
+                        .join(", ")
+                        .as_str(),
+                );
                 sb.push('>');
             }
         };
@@ -226,9 +232,9 @@ impl RustType {
                 "i16" => "short",
                 "i32" => "int",
                 "i64" => "long",
-                "i128" => "Int128", // .NET 7
-                "isize" if use_nint_types => "nint",  // C# 9.0
-                "isize" => "System.IntPtr",  // C# 9.0
+                "i128" => "Int128",                  // .NET 7
+                "isize" if use_nint_types => "nint", // C# 9.0
+                "isize" => "System.IntPtr",          // C# 9.0
                 "u8" => "byte",
                 "u16" => "ushort",
                 "u32" => "uint",
@@ -360,28 +366,35 @@ impl RustType {
                 // function pointer can not annotate ? so emit inner only
                 if self.type_name == "Option" {
                     sb.push_str(
-                    inner.first().unwrap()
-                        .to_csharp_string(
-                            options,
-                            alias_map,
-                            emit_from_struct,
-                            method_name,
-                            parameter_name,
-                        )
-                        .as_str(),
-                );
-                } else {
-                    sb.push_str(type_csharp_string.as_str());
-                    sb.push('<');
-                    sb.push_str(
-                        inner.iter().map(|x|
-                            x.to_csharp_string(
+                        inner
+                            .first()
+                            .unwrap()
+                            .to_csharp_string(
                                 options,
                                 alias_map,
                                 emit_from_struct,
                                 method_name,
                                 parameter_name,
-                            )).join(", ").as_str(),
+                            )
+                            .as_str(),
+                    );
+                } else {
+                    sb.push_str(type_csharp_string.as_str());
+                    sb.push('<');
+                    sb.push_str(
+                        inner
+                            .iter()
+                            .map(|x| {
+                                x.to_csharp_string(
+                                    options,
+                                    alias_map,
+                                    emit_from_struct,
+                                    method_name,
+                                    parameter_name,
+                                )
+                            })
+                            .join(", ")
+                            .as_str(),
                     );
                     sb.push('>');
                 }
@@ -496,7 +509,8 @@ pub fn build_method_delegate_if_required(
                     .iter()
                     .enumerate()
                     .map(|(index, p)| {
-                        let cs = p.rust_type.to_csharp_string(
+                        let redirect_type = (options.csharp_type_redirect)(&p.rust_type);
+                        let cs = redirect_type.to_csharp_string(
                             options,
                             alias_map,
                             emit_from_struct,
@@ -520,24 +534,25 @@ pub fn build_method_delegate_if_required(
                 Some(delegate_code)
             }
         }
-        TypeKind::Generic(inner) => {let del = inner
-            .iter()
-            .filter_map(|x| {
-                build_method_delegate_if_required(
-                    x,
-                    options,
-                    alias_map,
-                    method_name,
-                    parameter_name,
-                )
-            })
-            .join(", ");
+        TypeKind::Generic(inner) => {
+            let del = inner
+                .iter()
+                .filter_map(|x| {
+                    build_method_delegate_if_required(
+                        x,
+                        options,
+                        alias_map,
+                        method_name,
+                        parameter_name,
+                    )
+                })
+                .join(", ");
             if del.is_empty() {
                 None
             } else {
                 Some(del)
             }
-        },
+        }
         _ => None,
     }
 }
