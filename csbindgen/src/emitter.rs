@@ -95,10 +95,10 @@ pub fn emit_type_redirect(options: &BindgenOptions, rust_type: &RustType) -> Rus
 // convert struct* to System.IntPtr
 pub fn emit_type_to_intptr(options: &BindgenOptions, rust_type: &RustType) -> RustType {
     if let TypeKind::Pointer(_, inner) = &rust_type.type_kind {
-        if (options
+        if options
             .csharp_gen_safe_handle
             .iter()
-            .any(|name| name.to_string() == inner.type_name))
+            .any(|name| name.to_string() == inner.type_name)
         {
             return RustType {
                 type_name: "System.IntPtr".to_string(),
@@ -134,11 +134,6 @@ pub fn emit_csharp_safe_handle(
                 ),
             },
         );
-
-        //TODO: remove this hack
-        if struct_type.type_name == struct_name.to_string() {
-            continue;
-        }
 
         let convert_type = emit_type_redirect(options, &struct_type);
 
@@ -364,11 +359,6 @@ pub fn emit_csharp(
                 if type_name == "bool" {
                     type_name = "[MarshalAs(UnmanagedType.U1)] bool".to_string();
                 }
-
-                println!(
-                    "cargo:warning=[yrm test] convert {} {} to {} {}",
-                    method_name, p.rust_type.type_name, redirect_type.type_name, type_name
-                );
 
                 format!("{} {}", type_name, escape_name(p.name.as_str()))
             })

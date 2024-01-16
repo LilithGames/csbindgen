@@ -115,14 +115,14 @@ impl Builder {
         self
     }
 
-    /// configure C# extra import namespace,
+    /// configure C# generate SafeHandle,
     /// "using {csharp_namespace};"
     pub fn csharp_gen_safe_handle<T: Into<String>>(mut self, class_name: T) -> Builder {
         self.options.csharp_gen_safe_handle.push(class_name.into());
         self
     }
 
-    /// configure C# load dll name,
+    /// configure C# type redirect,
     /// `[DllImport({csharp_dll_name})]`
     pub fn csharp_type_redirect(mut self, func: fn(rust_type: &RustType) -> RustType) -> Builder {
         self.options.csharp_type_redirect = func;
@@ -216,7 +216,7 @@ impl Builder {
     /// configure C# generate const, default is false
     /// equivalent to csharp_generate_const_filter(|_| csharp_generate_const)
     #[deprecated(note = "User csharp_generate_const_filter instead")]
-    pub fn csharp_generate_const(mut self, csharp_generate_const: bool) -> Builder {
+    pub fn csharp_generate_const(self, csharp_generate_const: bool) -> Builder {
         self.csharp_generate_const_filter(if csharp_generate_const {
             |_| true
         } else {
