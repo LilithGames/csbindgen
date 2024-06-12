@@ -3,7 +3,7 @@ mod builder;
 mod emitter;
 mod field_map;
 mod parser;
-mod type_meta;
+pub mod type_meta;
 mod util;
 
 use alias_map::AliasMap;
@@ -49,8 +49,7 @@ pub(crate) fn generate(
         collect_struct(&file_ast, &mut structs);
         collect_enum(&file_ast, &mut enums);
 
-        collect_const(&file_ast, &mut consts,options.csharp_generate_const_filter);
-       
+        collect_const(&file_ast, &mut consts, options.csharp_generate_const_filter);
     }
 
     // collect using_types
